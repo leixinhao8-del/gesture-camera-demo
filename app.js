@@ -203,37 +203,70 @@ const computeStrokeWidth = (from, to) => {
   return state.smoothedWidth;
 };
 
-const drawLineSegment = (ctx, from, to, color, width, alpha) => {
-  if (!from || !to || alpha < 0.02) return;
+// Interpolate missing points to keep ~4px spacing
+const interpolateGap = (p1, p2, maxStep = 4) => {
+  const d = distance(p1, p2);
+  if (d <= maxStep) return [];
+  const count = Math.floor(d / maxStep);
+  const pts = [];
+  for (let i = 1; i <= count; i++) {
+    const t = i / (count + 1);
+    pts.push({ x: p1.x + (p2.x - p1.x) * t, y: p1.y + (p2.y - p1.y) * t });
+  }
+  return pts;
+};
+
+// Draw one stroke as a smooth Catmull-Rom → quadratic curve
+const drawSmoothStroke = (ctx, stroke, alpha) => {
+  const pts = stroke.points;
+  const n = pts.length;
+  if (n < 2 || alpha < 0.02) return;
+
+  const width = stroke.widths[Math.floor(n / 2)] || 6;
+
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  ctx.shadowColor = color;
-  ctx.shadowBlur = alpha > 0.4 ? 12 : 6;
-  ctx.strokeStyle = color;
+  ctx.shadowColor = stroke.color;
+  ctx.shadowBlur = 12;
+  ctx.strokeStyle = stroke.color;
   ctx.lineWidth = width;
   ctx.beginPath();
-  ctx.moveTo(from.x, from.y);
-  ctx.lineTo(to.x, to.y);
+  ctx.moveTo(pts[0].x, pts[0].y);
+
+  if (n === 2) {
+    ctx.lineTo(pts[1].x, pts[1].y);
+  } else {
+    // Catmull-Rom → quadraticCurveTo: control point at Pi, anchor at midpoint Pi/Pi+1
+    for (let i = 0; i < n - 2; i++) {
+      const xc = (pts[i].x + pts[i + 1].x) / 2;
+      const yc = (pts[i].y + pts[i + 1].y) / 2;
+      ctx.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc);
+    }
+    ctx.lineTo(pts[n - 1].x, pts[n - 1].y);
+  }
+
   ctx.stroke();
   ctx.restore();
 };
 
-const drawSegment = (from, to, color = state.color, width) => {
+const drawSegment = (from, to, color = state.color) => {
   if (!from || !to) return;
-  if (width === undefined) width = computeStrokeWidth(from, to);
+  const width = computeStrokeWidth(from, to);
 
-  // Draw to paint canvas
-  drawLineSegment(paintCtx, from, to, color, width, 1);
-
-  // Capture stroke data for lifecycle fading
+  // Capture point with gap interpolation (fill in points between sparse inputs)
   if (state.currentStroke) {
+    const gap = interpolateGap(from, to);
+    for (const p of gap) {
+      state.currentStroke.points.push(p);
+      state.currentStroke.widths.push(width);
+    }
     state.currentStroke.points.push({ x: to.x, y: to.y });
     state.currentStroke.widths.push(width);
   }
 
-  // Emit glow particles along the stroke (capped at 200)
+  // Emit glow particles (capped at 200)
   if (state.particles.length < 200) {
     for (let i = 0; i < 2; i += 1) {
       state.particles.push({
@@ -549,7 +582,7 @@ const renderFrame = () => {
     fxCtx.restore();
   }
 
-  // 6. Stroke lifecycle — redraw paint canvas with per-stroke fading
+  // 6. Stroke lifecycle — draw all strokes as smooth curves with uniform fading
   paintCtx.clearRect(0, 0, width, height);
   const now = performance.now();
   const strokeLife = 2800;
@@ -557,22 +590,11 @@ const renderFrame = () => {
     const age = now - stroke.birth;
     if (age > strokeLife) return false;
 
-    // Quick skip: if the oldest segment is already invisible, skip whole stroke
-    if (age > 1200) {
-      const lastAlpha = Math.pow(Math.max(0, 1 - age * 1.7 / strokeLife), 1.8);
-      if (lastAlpha < 0.015) return false;
-    }
+    // Uniform alpha for the whole stroke: fades as one smooth band
+    const alpha = Math.pow(Math.max(0, 1 - age / strokeLife), 1.8);
+    if (alpha < 0.015) return false;
 
-    const segCount = stroke.points.length - 1;
-    for (let i = 0; i < segCount; i++) {
-      const from = stroke.points[i];
-      const to = stroke.points[i + 1];
-      const segRatio = (i + 1) / segCount;
-      const effectiveAge = age * (1 + segRatio * 0.7);
-      const alpha = Math.pow(Math.max(0, 1 - effectiveAge / strokeLife), 1.8);
-      if (alpha < 0.015) continue;
-      drawLineSegment(paintCtx, from, to, stroke.color, stroke.widths[i], alpha);
-    }
+    drawSmoothStroke(paintCtx, stroke, alpha);
     return true;
   });
 

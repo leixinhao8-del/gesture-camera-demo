@@ -561,20 +561,21 @@ const renderFrame = () => {
     fxCtx.restore();
   }
 
-  // 6. Fade paint canvas (destination-out erosion — one fillRect, no per-stroke loop)
+  // 6. Fade paint canvas — destination-out erosion, ~2s to fully fade
   paintCtx.save();
   paintCtx.globalCompositeOperation = "destination-out";
-  paintCtx.globalAlpha = 0.007;
+  paintCtx.globalAlpha = 0.025;
   paintCtx.fillStyle = "white";
   paintCtx.fillRect(0, 0, width, height);
   paintCtx.restore();
 
-  // Clean up old stroke tracking data periodically (every ~2s at 60fps)
-  if (state.frameCount % 120 === 0) {
-    state.strokes = state.strokes.filter((s) => performance.now() - s.birth < 5500);
+  // Clean up old stroke tracking data periodically
+  if (state.frameCount % 60 === 0) {
+    state.strokes = state.strokes.filter((s) => performance.now() - s.birth < 3000);
   }
 
   state.frameCount += 1;
+  const now = performance.now();
   if (now - state.lastFpsAt > 600) {
     fpsEl.textContent = String(Math.round((state.frameCount * 1000) / (now - state.lastFpsAt)));
     state.frameCount = 0;

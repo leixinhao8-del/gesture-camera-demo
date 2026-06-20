@@ -216,46 +216,25 @@ const interpolateGap = (p1, p2, maxStep = 4) => {
   return pts;
 };
 
-// Draw one stroke as a smooth Catmull-Rom → quadratic curve
-const drawSmoothStroke = (ctx, stroke, alpha) => {
-  const pts = stroke.points;
-  const n = pts.length;
-  if (n < 2 || alpha < 0.02) return;
-
-  const width = stroke.widths[Math.floor(n / 2)] || 6;
-
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.shadowColor = stroke.color;
-  ctx.shadowBlur = 12;
-  ctx.strokeStyle = stroke.color;
-  ctx.lineWidth = width;
-  ctx.beginPath();
-  ctx.moveTo(pts[0].x, pts[0].y);
-
-  if (n === 2) {
-    ctx.lineTo(pts[1].x, pts[1].y);
-  } else {
-    // Catmull-Rom → quadraticCurveTo: control point at Pi, anchor at midpoint Pi/Pi+1
-    for (let i = 0; i < n - 2; i++) {
-      const xc = (pts[i].x + pts[i + 1].x) / 2;
-      const yc = (pts[i].y + pts[i + 1].y) / 2;
-      ctx.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc);
-    }
-    ctx.lineTo(pts[n - 1].x, pts[n - 1].y);
-  }
-
-  ctx.stroke();
-  ctx.restore();
-};
-
 const drawSegment = (from, to, color = state.color) => {
   if (!from || !to) return;
   const width = computeStrokeWidth(from, to);
 
-  // Capture point with gap interpolation (fill in points between sparse inputs)
+  // Draw immediately — single line segment, 4px interpolation makes it seamless
+  paintCtx.save();
+  paintCtx.lineCap = "round";
+  paintCtx.lineJoin = "round";
+  paintCtx.shadowColor = color;
+  paintCtx.shadowBlur = 12;
+  paintCtx.strokeStyle = color;
+  paintCtx.lineWidth = width;
+  paintCtx.beginPath();
+  paintCtx.moveTo(from.x, from.y);
+  paintCtx.lineTo(to.x, to.y);
+  paintCtx.stroke();
+  paintCtx.restore();
+
+  // Capture point with gap interpolation
   if (state.currentStroke) {
     const gap = interpolateGap(from, to);
     for (const p of gap) {
@@ -582,21 +561,18 @@ const renderFrame = () => {
     fxCtx.restore();
   }
 
-  // 6. Stroke lifecycle — draw all strokes as smooth curves with uniform fading
-  paintCtx.clearRect(0, 0, width, height);
-  const now = performance.now();
-  const strokeLife = 2800;
-  state.strokes = state.strokes.filter((stroke) => {
-    const age = now - stroke.birth;
-    if (age > strokeLife) return false;
+  // 6. Fade paint canvas (destination-out erosion — one fillRect, no per-stroke loop)
+  paintCtx.save();
+  paintCtx.globalCompositeOperation = "destination-out";
+  paintCtx.globalAlpha = 0.007;
+  paintCtx.fillStyle = "white";
+  paintCtx.fillRect(0, 0, width, height);
+  paintCtx.restore();
 
-    // Uniform alpha for the whole stroke: fades as one smooth band
-    const alpha = Math.pow(Math.max(0, 1 - age / strokeLife), 1.8);
-    if (alpha < 0.015) return false;
-
-    drawSmoothStroke(paintCtx, stroke, alpha);
-    return true;
-  });
+  // Clean up old stroke tracking data periodically (every ~2s at 60fps)
+  if (state.frameCount % 120 === 0) {
+    state.strokes = state.strokes.filter((s) => performance.now() - s.birth < 5500);
+  }
 
   state.frameCount += 1;
   if (now - state.lastFpsAt > 600) {

@@ -78,6 +78,7 @@ const state = {
   currentStroke: null,
   strokeCount: 0,
   particles: [],
+  drawParticles: [],
   fireworks: [],
   geometryState: createGeometryState(),
   fireworkState: createFireworkState(),
@@ -216,23 +217,74 @@ const interpolateGap = (p1, p2, maxStep = 4) => {
   return pts;
 };
 
+// Draw one stroke as a smooth Catmull-Rom → quadratic curve
+const drawSmoothStroke = (ctx, stroke, alpha) => {
+  const pts = stroke.points;
+  const n = pts.length;
+  if (n < 2 || alpha < 0.02) return;
+  const width = stroke.widths[Math.floor(n / 2)] || 6;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.shadowColor = stroke.color;
+  ctx.shadowBlur = 12;
+  ctx.strokeStyle = stroke.color;
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  if (n === 2) {
+    ctx.lineTo(pts[1].x, pts[1].y);
+  } else {
+    for (let i = 0; i < n - 2; i++) {
+      const xc = (pts[i].x + pts[i + 1].x) / 2;
+      const yc = (pts[i].y + pts[i + 1].y) / 2;
+      ctx.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc);
+    }
+    ctx.lineTo(pts[n - 1].x, pts[n - 1].y);
+  }
+  ctx.stroke();
+  ctx.restore();
+};
+
+// Emit a draw particle near a point
+const emitDrawParticle = (x, y, color) => {
+  if (state.drawParticles.length >= 500) return;
+  state.drawParticles.push({
+    x: x + (Math.random() - 0.5) * 4,
+    y: y + (Math.random() - 0.5) * 4,
+    vx: (Math.random() - 0.5) * 0.5,
+    vy: (Math.random() - 0.5) * 0.5 - 0.15,
+    birth: performance.now(),
+    life: 500 + Math.random() * 400,
+    size: 0.8 + Math.random() * 1.2,
+    color,
+  });
+};
+
+// Emit fade particles from a random point on a stroke
+const emitFadeParticles = (stroke, age, strokeLife) => {
+  const progress = age / strokeLife;
+  if (progress < 0.15 || progress > 0.9) return;
+  if (state.frameCount % 3 !== 0) return;
+  if (state.drawParticles.length >= 500) return;
+  const pt = stroke.points[Math.floor(Math.random() * stroke.points.length)];
+  if (!pt) return;
+  state.drawParticles.push({
+    x: pt.x + (Math.random() - 0.5) * 3,
+    y: pt.y + (Math.random() - 0.5) * 3,
+    vx: (Math.random() - 0.5) * 0.3,
+    vy: (Math.random() - 0.5) * 0.3 - 0.1,
+    birth: performance.now(),
+    life: 400 + Math.random() * 300,
+    size: 0.6 + Math.random() * 0.8,
+    color: stroke.color,
+  });
+};
+
 const drawSegment = (from, to, color = state.color) => {
   if (!from || !to) return;
   const width = computeStrokeWidth(from, to);
-
-  // Draw immediately — single line segment, 4px interpolation makes it seamless
-  paintCtx.save();
-  paintCtx.lineCap = "round";
-  paintCtx.lineJoin = "round";
-  paintCtx.shadowColor = color;
-  paintCtx.shadowBlur = 12;
-  paintCtx.strokeStyle = color;
-  paintCtx.lineWidth = width;
-  paintCtx.beginPath();
-  paintCtx.moveTo(from.x, from.y);
-  paintCtx.lineTo(to.x, to.y);
-  paintCtx.stroke();
-  paintCtx.restore();
 
   // Capture point with gap interpolation
   if (state.currentStroke) {
@@ -240,25 +292,11 @@ const drawSegment = (from, to, color = state.color) => {
     for (const p of gap) {
       state.currentStroke.points.push(p);
       state.currentStroke.widths.push(width);
+      emitDrawParticle(p.x, p.y, color);
     }
     state.currentStroke.points.push({ x: to.x, y: to.y });
     state.currentStroke.widths.push(width);
-  }
-
-  // Emit glow particles (capped at 200)
-  if (state.particles.length < 200) {
-    for (let i = 0; i < 2; i += 1) {
-      state.particles.push({
-        x: to.x + (Math.random() - 0.5) * 6,
-        y: to.y + (Math.random() - 0.5) * 6,
-        vx: (Math.random() - 0.5) * 1.2,
-        vy: (Math.random() - 0.5) * 1.2,
-        life: 0.7 + Math.random() * 0.2,
-        decay: 0.03 + Math.random() * 0.01,
-        size: 1.5 + Math.random() * 2,
-        color,
-      });
-    }
+    emitDrawParticle(to.x, to.y, color);
   }
 };
 
@@ -561,22 +599,46 @@ const renderFrame = () => {
     fxCtx.restore();
   }
 
-  // 6. Fade paint canvas — destination-out erosion
-  // At 0.04/60fps: ~71% faded at 0.5s, ~91% at 1s, 99.25% at 2s (no visible residue)
-  paintCtx.save();
-  paintCtx.globalCompositeOperation = "destination-out";
-  paintCtx.globalAlpha = 0.04;
-  paintCtx.fillStyle = "white";
-  paintCtx.fillRect(0, 0, width, height);
-  paintCtx.restore();
+  // 6. Draw layer — clearRect + redraw active strokes and particles (no residual)
+  paintCtx.clearRect(0, 0, width, height);
+  const now = performance.now();
+  const strokeLife = 2500;
 
-  // Clean up old stroke tracking data
-  if (state.frameCount % 60 === 0) {
-    state.strokes = state.strokes.filter((s) => performance.now() - s.birth < 3000);
-  }
+  // Redraw strokes with per-stroke alpha
+  state.strokes = state.strokes.filter((stroke) => {
+    const age = now - stroke.birth;
+    if (age > strokeLife) return false;
+    const alpha = Math.pow(Math.max(0, 1 - age / strokeLife), 1.8);
+    if (alpha < 0.01) return false;
+    drawSmoothStroke(paintCtx, stroke, alpha);
+    emitFadeParticles(stroke, age, strokeLife);
+    return true;
+  });
+
+  // Update and render draw particles
+  state.drawParticles = state.drawParticles.filter((p) => {
+    const age = now - p.birth;
+    if (age > p.life) return false;
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.008;
+    p.vx *= 0.97;
+    p.vy *= 0.97;
+    const progress = age / p.life;
+    const alpha = Math.pow(Math.max(0, 1 - progress), 1.6);
+    paintCtx.save();
+    paintCtx.globalAlpha = alpha;
+    paintCtx.shadowBlur = 6;
+    paintCtx.shadowColor = p.color;
+    paintCtx.fillStyle = p.color;
+    paintCtx.beginPath();
+    paintCtx.arc(p.x, p.y, p.size * (1 - progress * 0.3), 0, Math.PI * 2);
+    paintCtx.fill();
+    paintCtx.restore();
+    return true;
+  });
 
   state.frameCount += 1;
-  const now = performance.now();
   if (now - state.lastFpsAt > 600) {
     fpsEl.textContent = String(Math.round((state.frameCount * 1000) / (now - state.lastFpsAt)));
     state.frameCount = 0;
@@ -746,6 +808,7 @@ const resetInteractionState = () => {
   state.geometryState = createGeometryState();
   state.fireworkState = createFireworkState();
   state.particles = [];
+  state.drawParticles = [];
   state.fireworks = [];
   state.strokes = [];
   state.currentStroke = null;
@@ -1196,6 +1259,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     state.geometryState.current = null;
     state.particles = [];
+    state.drawParticles = [];
     state.fireworks = [];
     // Keep strokes — they continue to fade while hidden
   } else {

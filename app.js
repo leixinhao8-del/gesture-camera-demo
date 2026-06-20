@@ -678,13 +678,15 @@ const ensureHandTracking = async () => {
   } catch (error) {
     rememberError(error);
     state.lastError = `landmarker: ${error.message || error}`;
-    console.warn(error);
+    console.warn("hand model loading failed:", error);
     state.mode = "pointer";
     modeLabel.textContent = "Pointer";
     pointerMode.classList.add("active");
     handMode.classList.remove("active");
-    setStatus("hand unavailable");
-    tipEl.textContent = "local model unavailable";
+    setStatus("hand model unavailable");
+    tipEl.textContent =
+      "模型文件较大 (7.5MB+32MB)，请确保网络通畅后刷新重试。" +
+      " 如果反复失败，尝试切换网络或使用 Chrome/Safari。";
   } finally {
     state.handLoading = null;
   }

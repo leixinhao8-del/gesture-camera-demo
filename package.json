@@ -1,0 +1,15 @@
+{
+  "name": "gesture-camera-demo",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Camera-based gesture recognition demo with Geometry & Firework modes",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5180",
+    "preview": "vite preview --host 127.0.0.1 --port 5180",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}

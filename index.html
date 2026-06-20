@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Claude Gesture Camera Demo</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="stage" aria-label="互动摄像头画板">
+      <video id="camera" autoplay playsinline muted></video>
+      <canvas id="videoCanvas"></canvas>
+      <canvas id="paint"></canvas>
+      <canvas id="fx"></canvas>
+
+      <header class="toolbar" aria-label="控制栏">
+        <div class="brand">
+          <span class="spark"></span>
+          <strong>ClaudeCam</strong>
+          <span id="modeLabel">Geometry</span>
+        </div>
+
+        <div class="colors" aria-label="颜色">
+          <button class="swatch active" data-color="#fff7c7" style="--swatch: #fff7c7" aria-label="暖白"></button>
+          <button class="swatch" data-color="#ff5c8a" style="--swatch: #ff5c8a" aria-label="粉色"></button>
+          <button class="swatch" data-color="#7cfdc4" style="--swatch: #7cfdc4" aria-label="薄荷绿"></button>
+          <button class="swatch" data-color="#68a7ff" style="--swatch: #68a7ff" aria-label="蓝色"></button>
+          <button class="swatch" data-color="#f8a04f" style="--swatch: #f8a04f" aria-label="橙色"></button>
+          <button class="swatch" data-color="#aeb4bd" style="--swatch: #aeb4bd" aria-label="灰色"></button>
+        </div>
+
+        <div class="actions">
+          <button id="pointerMode" class="tool" title="鼠标或触控画线，用来测试画面层">Pointer</button>
+          <button id="handMode" class="tool active" title="双手拇指和食指控制四边形">Geometry</button>
+          <button id="fireworkMode" class="tool" title="单手握拳后展开释放烟花">Firework</button>
+          <button id="restartCamera" class="icon-tool" title="重新请求摄像头" aria-label="重新请求摄像头">⟳</button>
+          <button id="clear" class="icon-tool" title="清屏" aria-label="清屏">⌫</button>
+          <button id="shot" class="icon-tool" title="截图" aria-label="截图">↧</button>
+        </div>
+      </header>
+
+      <aside class="readout" aria-live="polite">
+        <p><span>Status</span><b id="status">starting camera</b></p>
+        <p><span>FPS</span><b id="fps">--</b></p>
+        <p><span>Burst</span><b id="strokeCount">0</b></p>
+        <p><span>Tip</span><b id="tip">use both hands</b></p>
+        <p><span>Mode</span><b id="debugMode">geometry</b></p>
+        <p><span>Server</span><b id="debugServer">loaded</b></p>
+        <p><span>Camera</span><b id="debugCamera">0</b></p>
+        <p><span>Landmarker</span><b id="debugLandmarker">no</b></p>
+        <p><span>Hands</span><b id="debugHands">0</b></p>
+        <p><span>Loop</span><b id="debugLoop">0</b></p>
+        <p><span>Detect</span><b id="debugDetect">0</b></p>
+        <p><span>FW phase</span><b id="debugPhase">idle</b></p>
+        <p><span>Frames</span><b id="debugFrames">0/0</b></p>
+        <p><span>Cooldown</span><b id="debugCooldown">0ms</b></p>
+        <p><span>Video canvas</span><b id="debugVideoCanvas">no</b></p>
+        <p><span>Fireworks</span><b id="debugFireworksCount">0</b></p>
+        <p><span>Last error</span><b id="debugError">none</b></p>
+      </aside>
+
+      <div id="cameraNotice" class="camera-notice" hidden>
+        <strong>Camera needs attention</strong>
+        <span>Allow camera access, close duplicate demo tabs, or press the restart icon.</span>
+      </div>
+
+      <div id="serverNotice" class="camera-notice" hidden>
+        <strong>Open this demo from localhost</strong>
+        <span>Camera tracking will not run from a file path. Use http://127.0.0.1:5180/</span>
+      </div>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

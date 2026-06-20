@@ -73,6 +73,8 @@ const state = {
   mode: "geometry",
   drawing: false,
   lastPoint: null,
+  strokes: [],
+  currentStroke: null,
   strokeCount: 0,
   particles: [],
   fireworks: [],
@@ -191,29 +193,52 @@ const eventPoint = (event) => {
   };
 };
 
-const drawSegment = (from, to, color = state.color, width = 3.5) => {
-  if (!from || !to) return;
-  paintCtx.save();
-  paintCtx.lineCap = "round";
-  paintCtx.lineJoin = "round";
-  paintCtx.shadowColor = color;
-  paintCtx.shadowBlur = 20;
-  paintCtx.strokeStyle = color;
-  paintCtx.lineWidth = width;
-  paintCtx.beginPath();
-  paintCtx.moveTo(from.x, from.y);
-  paintCtx.lineTo(to.x, to.y);
-  paintCtx.stroke();
-  paintCtx.restore();
+const computeStrokeWidth = (from, to) => {
+  const speed = distance(from, to);
+  // Slow movement = thick, fast movement = thin
+  return Math.min(5, Math.max(1.5, 5 - speed * 0.18));
+};
 
-  for (let i = 0; i < 4; i += 1) {
+const drawLineSegment = (ctx, from, to, color, width, alpha) => {
+  if (!from || !to) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 20;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  ctx.moveTo(from.x, from.y);
+  ctx.lineTo(to.x, to.y);
+  ctx.stroke();
+  ctx.restore();
+};
+
+const drawSegment = (from, to, color = state.color, width) => {
+  if (!from || !to) return;
+  if (width === undefined) width = computeStrokeWidth(from, to);
+
+  // Draw to paint canvas
+  drawLineSegment(paintCtx, from, to, color, width, 1);
+
+  // Capture stroke data for lifecycle fading
+  if (state.currentStroke) {
+    state.currentStroke.points.push({ x: to.x, y: to.y });
+    state.currentStroke.widths.push(width);
+  }
+
+  // Emit glow particles along the stroke
+  for (let i = 0; i < 3; i += 1) {
     state.particles.push({
       x: to.x + (Math.random() - 0.5) * 8,
       y: to.y + (Math.random() - 0.5) * 8,
-      vx: (Math.random() - 0.5) * 1.7,
-      vy: (Math.random() - 0.5) * 1.7,
-      life: 1,
-      size: 2 + Math.random() * 3,
+      vx: (Math.random() - 0.5) * 1.4,
+      vy: (Math.random() - 0.5) * 1.4,
+      life: 0.8 + Math.random() * 0.2,
+      decay: 0.025 + Math.random() * 0.015,
+      size: 1.5 + Math.random() * 2.5,
       color,
     });
   }
@@ -506,7 +531,7 @@ const renderFrame = () => {
     particle.x += particle.vx;
     particle.y += particle.vy;
     particle.vy += particle.gravity || 0;
-    particle.life -= particle.decay || 0.035;
+    particle.life -= particle.decay || 0.025;
     fxCtx.save();
     fxCtx.globalAlpha = particle.life;
     fxCtx.fillStyle = particle.color;
@@ -518,8 +543,29 @@ const renderFrame = () => {
     fxCtx.restore();
   }
 
-  state.frameCount += 1;
+  // 6. Stroke lifecycle — redraw paint canvas with per-stroke fading
+  paintCtx.clearRect(0, 0, width, height);
   const now = performance.now();
+  const strokeLife = 2800;
+  state.strokes = state.strokes.filter((stroke) => {
+    const age = now - stroke.birth;
+    if (age > strokeLife) return false;
+
+    const segCount = stroke.points.length - 1;
+    for (let i = 0; i < segCount; i++) {
+      const from = stroke.points[i];
+      const to = stroke.points[i + 1];
+      // End segments (higher index) fade first — like smoke dispersing from the tip
+      const segRatio = (i + 1) / segCount;
+      const effectiveAge = age * (1 + segRatio * 0.7);
+      const alpha = Math.pow(Math.max(0, 1 - effectiveAge / strokeLife), 1.8);
+      if (alpha < 0.015) continue;
+      drawLineSegment(paintCtx, from, to, stroke.color, stroke.widths[i], alpha);
+    }
+    return true;
+  });
+
+  state.frameCount += 1;
   if (now - state.lastFpsAt > 600) {
     fpsEl.textContent = String(Math.round((state.frameCount * 1000) / (now - state.lastFpsAt)));
     state.frameCount = 0;
@@ -593,27 +639,80 @@ const startCamera = async () => {
   }
 };
 
-const startPointerStroke = (event) => {
-  if (state.mode !== "pointer") return;
+const startStroke = (point) => {
   state.drawing = true;
-  state.lastPoint = eventPoint(event);
-  paint.setPointerCapture(event.pointerId);
+  state.lastPoint = point;
+  state.currentStroke = {
+    points: [{ x: point.x, y: point.y }],
+    widths: [],
+    color: state.color,
+    birth: performance.now(),
+    life: 2800,
+  };
+  state.strokes.push(state.currentStroke);
 };
 
-const movePointerStroke = (event) => {
-  if (state.mode !== "pointer" || !state.drawing) return;
-  const next = eventPoint(event);
+const moveStroke = (point) => {
+  if (!state.drawing) return;
+  const next = point;
   drawSegment(state.lastPoint, next);
   drawPointerHalo(next);
   state.lastPoint = next;
 };
 
-const endPointerStroke = () => {
+const endStroke = () => {
   if (!state.drawing) return;
   state.drawing = false;
   state.lastPoint = null;
+  state.currentStroke = null;
   state.strokeCount += 1;
   strokeCountEl.textContent = String(state.strokeCount);
+};
+
+// Pointer (mouse/stylus) handlers
+const startPointerStroke = (event) => {
+  if (state.mode !== "pointer") return;
+  startStroke(eventPoint(event));
+  paint.setPointerCapture(event.pointerId);
+};
+
+const movePointerStroke = (event) => {
+  if (state.mode !== "pointer") return;
+  moveStroke(eventPoint(event));
+};
+
+const endPointerStroke = () => {
+  if (state.mode !== "pointer") return;
+  endStroke();
+};
+
+// Touch (mobile finger) handlers
+const touchPoint = (touch) => {
+  const rect = paint.getBoundingClientRect();
+  return {
+    x: touch.clientX - rect.left,
+    y: touch.clientY - rect.top,
+  };
+};
+
+const startTouchStroke = (event) => {
+  if (state.mode !== "pointer") return;
+  event.preventDefault();
+  const touch = event.changedTouches[0];
+  startStroke(touchPoint(touch));
+};
+
+const moveTouchStroke = (event) => {
+  if (state.mode !== "pointer") return;
+  event.preventDefault();
+  const touch = event.changedTouches[0];
+  moveStroke(touchPoint(touch));
+};
+
+const endTouchStroke = (event) => {
+  if (state.mode !== "pointer") return;
+  event.preventDefault();
+  endStroke();
 };
 
 const resetInteractionState = () => {
@@ -621,6 +720,8 @@ const resetInteractionState = () => {
   state.fireworkState = createFireworkState();
   state.particles = [];
   state.fireworks = [];
+  state.strokes = [];
+  state.currentStroke = null;
   state.lastGesture = null;
   state.gesturePhase = "idle";
   state.detectedHands = 0;
@@ -640,7 +741,7 @@ const setMode = async (mode) => {
   handMode.classList.toggle("active", mode === "geometry");
   fireworkMode.classList.toggle("active", mode === "firework");
   tipEl.textContent =
-    mode === "geometry" ? "use both hands" : mode === "firework" ? "fist then open" : "drag to draw";
+    mode === "geometry" ? "use both hands" : mode === "firework" ? "fist then open" : isMobile() ? "touch to draw" : "drag to draw";
 
   if (mode === "geometry" || mode === "firework") {
     await ensureHandTracking();
@@ -1044,10 +1145,17 @@ document.querySelectorAll(".swatch").forEach((button) => {
   });
 });
 
+// Pointer events (desktop mouse / stylus)
 paint.addEventListener("pointerdown", startPointerStroke);
 paint.addEventListener("pointermove", movePointerStroke);
 paint.addEventListener("pointerup", endPointerStroke);
 paint.addEventListener("pointercancel", endPointerStroke);
+
+// Touch events (mobile finger drawing)
+paint.addEventListener("touchstart", startTouchStroke, { passive: false });
+paint.addEventListener("touchmove", moveTouchStroke, { passive: false });
+paint.addEventListener("touchend", endTouchStroke, { passive: false });
+paint.addEventListener("touchcancel", endTouchStroke, { passive: false });
 pointerMode.addEventListener("click", () => setMode("pointer"));
 handMode.addEventListener("click", () => setMode("geometry"));
 fireworkMode.addEventListener("click", () => setMode("firework"));
@@ -1062,6 +1170,7 @@ document.addEventListener("visibilitychange", () => {
     state.geometryState.current = null;
     state.particles = [];
     state.fireworks = [];
+    // Keep strokes — they continue to fade while hidden
   } else {
     setStatus(state.mode === "pointer" ? "camera ready" : "tracking ready");
   }
@@ -1070,6 +1179,8 @@ document.addEventListener("visibilitychange", () => {
 clearButton.addEventListener("click", () => {
   const { width, height } = paint.getBoundingClientRect();
   paintCtx.clearRect(0, 0, width, height);
+  state.strokes = [];
+  state.currentStroke = null;
   resetInteractionState();
   state.strokeCount = 0;
   strokeCountEl.textContent = "0";
@@ -1117,5 +1228,12 @@ if (needsLocalServer()) {
   serverNotice.hidden = false;
 } else {
   // localhost or HTTPS — good to go
-  startCamera().then(() => setMode("geometry"));
+  if (isMobile()) {
+    // Mobile: default to touch draw, camera may work or not
+    setMode("pointer");
+    startCamera();
+  } else {
+    // Desktop: start with geometry mode
+    startCamera().then(() => setMode("geometry"));
+  }
 }

@@ -136,9 +136,18 @@ const isLocalhost = () =>
   location.hostname === "localhost" ||
   location.hostname === "[::1]";
 
-const isHttps = () => location.protocol === "https:";
+const isHttpsProtocol = () => location.protocol === "https:";
 
-const cameraAllowed = () => isLocalhost() || isHttps();
+const isAllowedDomain = () => {
+  const host = location.hostname;
+  // pages.dev (Cloudflare Pages) or vercel.app
+  if (host.endsWith(".pages.dev") || host.endsWith(".vercel.app")) return true;
+  // Any HTTPS domain (catches future custom domains)
+  return isHttpsProtocol();
+};
+
+const cameraAllowed = () =>
+  isLocalhost() || isHttpsProtocol() || isAllowedDomain();
 
 const needsLocalServer = () => location.protocol === "file:";
 
@@ -528,12 +537,12 @@ const startCamera = async () => {
       return;
     }
     if (!cameraAllowed()) {
-      setStatus("Camera requires HTTPS or localhost");
-      tipEl.textContent = "open via localhost or deploy to HTTPS";
-      serverNotice.querySelector("strong").textContent = "Camera requires HTTPS or localhost";
+      setStatus("Camera requires secure context");
+      tipEl.textContent = "请用 HTTPS 或 localhost 打开此页面";
+      serverNotice.querySelector("strong").textContent = "Camera requires secure context";
       serverNotice.querySelector("span").textContent =
-        "Camera access requires a secure context (HTTPS) or localhost. " +
-        "Open via http://127.0.0.1:5180/ or deploy to a HTTPS URL.";
+        "Camera access requires HTTPS or localhost. " +
+        "The current URL does not provide a secure context.";
       serverNotice.hidden = false;
       return;
     }
@@ -1101,10 +1110,10 @@ if (needsLocalServer()) {
   serverNotice.hidden = false;
 } else if (!cameraAllowed()) {
   // HTTP (not localhost) — show HTTPS hint
-  setStatus("Camera requires HTTPS or localhost");
+  setStatus("Camera requires secure context");
   tipEl.textContent = isWeChat()
     ? "微信内置浏览器不支持 — 请用 Safari/Chrome 打开 https:// 地址"
-    : "open via localhost or deploy to HTTPS";
+    : "open via HTTPS or localhost";
   serverNotice.hidden = false;
 } else {
   // localhost or HTTPS — good to go

@@ -142,6 +142,12 @@ const cameraAllowed = () => isLocalhost() || isHttps();
 
 const needsLocalServer = () => location.protocol === "file:";
 
+const isWeChat = () =>
+  /MicroMessenger|WeChat/i.test(navigator.userAgent);
+
+const isMobile = () =>
+  /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
 const cameraHasFrame = () =>
   video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
   video.videoWidth > 0 &&
@@ -545,6 +551,9 @@ const startCamera = async () => {
     });
     state.cameraStream = stream;
     video.srcObject = stream;
+    // Mobile-safe play — ensure playsinline is set
+    video.setAttribute("playsinline", "");
+    video.setAttribute("webkit-playsinline", "");
     await video.play();
     state.lastError = "";
     setStatus("camera ready");
@@ -562,7 +571,14 @@ const startCamera = async () => {
     rememberError(error);
     state.lastError = `camera: ${error.message || error}`;
     setStatus("camera blocked");
-    tipEl.textContent = "allow camera or close tabs";
+    // Show actionable error message based on context
+    if (isWeChat()) {
+      tipEl.textContent = "微信内置浏览器不支持摄像头 — 请用 Safari/Chrome 打开";
+    } else if (isMobile()) {
+      tipEl.textContent = "请允许摄像头权限，或关闭其他占用摄像头的标签页";
+    } else {
+      tipEl.textContent = "请允许摄像头权限，或关闭其他占用摄像头的标签页";
+    }
     setCameraNotice(true);
     console.error(error);
   }
@@ -1084,11 +1100,9 @@ if (needsLocalServer()) {
 } else if (!cameraAllowed()) {
   // HTTP (not localhost) — show HTTPS hint
   setStatus("Camera requires HTTPS or localhost");
-  tipEl.textContent = "open via localhost or deploy to HTTPS";
-  serverNotice.querySelector("strong").textContent = "Camera requires HTTPS or localhost";
-  serverNotice.querySelector("span").textContent =
-    "Camera access requires a secure context (HTTPS) or localhost. " +
-    "Open via http://127.0.0.1:5180/ or deploy to a HTTPS URL.";
+  tipEl.textContent = isWeChat()
+    ? "微信内置浏览器不支持 — 请用 Safari/Chrome 打开 https:// 地址"
+    : "open via localhost or deploy to HTTPS";
   serverNotice.hidden = false;
 } else {
   // localhost or HTTPS — good to go

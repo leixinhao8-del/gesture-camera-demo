@@ -60,13 +60,17 @@
       </aside>
 
       <div id="cameraNotice" class="camera-notice" hidden>
-        <strong>Camera needs attention</strong>
-        <span>Allow camera access, close duplicate demo tabs, or press the restart icon.</span>
+        <strong>🚫 Camera unavailable</strong>
+        <span>
+          Please use Safari or Chrome (not WeChat in-app browser).<br />
+          Allow camera permission if prompted.<br />
+          Close other tabs that may be using the camera, then press ⟳ to retry.
+        </span>
       </div>
 
       <div id="serverNotice" class="camera-notice" hidden>
-        <strong>Open this demo from localhost</strong>
-        <span>Camera tracking will not run from a file path. Use http://127.0.0.1:5180/</span>
+        <strong>Camera requires HTTPS or localhost</strong>
+        <span>Camera access needs a secure context. Open via localhost or deploy to HTTPS.</span>
       </div>
     </main>
 

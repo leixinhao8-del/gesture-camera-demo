@@ -561,15 +561,16 @@ const renderFrame = () => {
     fxCtx.restore();
   }
 
-  // 6. Fade paint canvas — destination-out erosion, ~2s to fully fade
+  // 6. Fade paint canvas — destination-out erosion
+  // At 0.04/60fps: ~71% faded at 0.5s, ~91% at 1s, 99.25% at 2s (no visible residue)
   paintCtx.save();
   paintCtx.globalCompositeOperation = "destination-out";
-  paintCtx.globalAlpha = 0.025;
+  paintCtx.globalAlpha = 0.04;
   paintCtx.fillStyle = "white";
   paintCtx.fillRect(0, 0, width, height);
   paintCtx.restore();
 
-  // Clean up old stroke tracking data periodically
+  // Clean up old stroke tracking data
   if (state.frameCount % 60 === 0) {
     state.strokes = state.strokes.filter((s) => performance.now() - s.birth < 3000);
   }

@@ -73,6 +73,7 @@ const state = {
   mode: "geometry",
   drawing: false,
   lastPoint: null,
+  smoothedWidth: 6,
   strokes: [],
   currentStroke: null,
   strokeCount: 0,
@@ -194,19 +195,22 @@ const eventPoint = (event) => {
 };
 
 const computeStrokeWidth = (from, to) => {
+  if (!from || !to) return state.smoothedWidth;
   const speed = distance(from, to);
-  // Slow movement = thick, fast movement = thin
-  return Math.min(5, Math.max(1.5, 5 - speed * 0.18));
+  // Slow movement = thick (10px), fast movement = thin (4px)
+  const target = Math.min(10, Math.max(4, 9 - speed * 0.13));
+  state.smoothedWidth += (target - state.smoothedWidth) * 0.18;
+  return state.smoothedWidth;
 };
 
 const drawLineSegment = (ctx, from, to, color, width, alpha) => {
-  if (!from || !to) return;
+  if (!from || !to || alpha < 0.02) return;
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   ctx.shadowColor = color;
-  ctx.shadowBlur = 20;
+  ctx.shadowBlur = alpha > 0.4 ? 12 : 6;
   ctx.strokeStyle = color;
   ctx.lineWidth = width;
   ctx.beginPath();
@@ -229,18 +233,20 @@ const drawSegment = (from, to, color = state.color, width) => {
     state.currentStroke.widths.push(width);
   }
 
-  // Emit glow particles along the stroke
-  for (let i = 0; i < 3; i += 1) {
-    state.particles.push({
-      x: to.x + (Math.random() - 0.5) * 8,
-      y: to.y + (Math.random() - 0.5) * 8,
-      vx: (Math.random() - 0.5) * 1.4,
-      vy: (Math.random() - 0.5) * 1.4,
-      life: 0.8 + Math.random() * 0.2,
-      decay: 0.025 + Math.random() * 0.015,
-      size: 1.5 + Math.random() * 2.5,
-      color,
-    });
+  // Emit glow particles along the stroke (capped at 200)
+  if (state.particles.length < 200) {
+    for (let i = 0; i < 2; i += 1) {
+      state.particles.push({
+        x: to.x + (Math.random() - 0.5) * 6,
+        y: to.y + (Math.random() - 0.5) * 6,
+        vx: (Math.random() - 0.5) * 1.2,
+        vy: (Math.random() - 0.5) * 1.2,
+        life: 0.7 + Math.random() * 0.2,
+        decay: 0.03 + Math.random() * 0.01,
+        size: 1.5 + Math.random() * 2,
+        color,
+      });
+    }
   }
 };
 
@@ -551,11 +557,16 @@ const renderFrame = () => {
     const age = now - stroke.birth;
     if (age > strokeLife) return false;
 
+    // Quick skip: if the oldest segment is already invisible, skip whole stroke
+    if (age > 1200) {
+      const lastAlpha = Math.pow(Math.max(0, 1 - age * 1.7 / strokeLife), 1.8);
+      if (lastAlpha < 0.015) return false;
+    }
+
     const segCount = stroke.points.length - 1;
     for (let i = 0; i < segCount; i++) {
       const from = stroke.points[i];
       const to = stroke.points[i + 1];
-      // End segments (higher index) fade first — like smoke dispersing from the tip
       const segRatio = (i + 1) / segCount;
       const effectiveAge = age * (1 + segRatio * 0.7);
       const alpha = Math.pow(Math.max(0, 1 - effectiveAge / strokeLife), 1.8);
@@ -655,9 +666,20 @@ const startStroke = (point) => {
 const moveStroke = (point) => {
   if (!state.drawing) return;
   const next = point;
+  // Skip very close points to avoid oversampling
+  if (distance(state.lastPoint, next) < 3) return;
   drawSegment(state.lastPoint, next);
   drawPointerHalo(next);
   state.lastPoint = next;
+
+  // Limit points per stroke to prevent memory buildup
+  if (state.currentStroke && state.currentStroke.points.length > 100) {
+    const excess = state.currentStroke.points.length - 80;
+    if (excess > 10) {
+      state.currentStroke.points.splice(0, excess);
+      state.currentStroke.widths.splice(0, excess);
+    }
+  }
 };
 
 const endStroke = () => {
@@ -667,6 +689,11 @@ const endStroke = () => {
   state.currentStroke = null;
   state.strokeCount += 1;
   strokeCountEl.textContent = String(state.strokeCount);
+
+  // Limit total strokes to 80 — remove oldest if over limit
+  if (state.strokes.length > 80) {
+    state.strokes.splice(0, state.strokes.length - 80);
+  }
 };
 
 // Pointer (mouse/stylus) handlers
